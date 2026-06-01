@@ -1,0 +1,71 @@
+name: Build PDK releases
+
+# Builds sky130 + gf180mcu from the Vyges open_pdks mirror using `ciel` as the commodity
+# builder, and publishes per-library tarball releases here — modeling
+# fossi-foundation/ciel-releases. A full sky130 build is heavy (~1-2h, needs the magic
+# toolchain via Nix); validate on the first manual dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      family:
+        description: 'sky130 | gf180mcu | all'
+        default: all
+  schedule:
+    - cron: '0 3 * * 1'   # weekly, Monday 03:00 UTC
+
+permissions:
+  contents: write          # ghr creates releases on this repo
+
+concurrency:
+  group: build-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [sky130, gf180mcu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate on the requested family (manual dispatch)
+        id: gate
+        run: |
+          REQ='${{ github.event.inputs.family }}'
+          if [ -z "$REQ" ] || [ "$REQ" = all ] || [ "$REQ" = '${{ matrix.family }}' ]; then
+            echo 'run=yes' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=no' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Nix
+        if: steps.gate.outputs.run == 'yes'
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Build from the Vyges open_pdks mirror + publish the release
+        if: steps.gate.outputs.run == 'yes'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ciel reads these to choose the open_pdks source — point at the Vyges mirror.
+          OPDKS_REPO_OWNER: vyges-tools
+          OPDKS_REPO_NAME: open_pdks
+        run: |
+          set -euxo pipefail
+          VERSION=$(git ls-remote https://github.com/vyges-tools/open_pdks.git master | awk 'NR==1{print $1}')
+          echo "Building ${{ matrix.family }} @ open_pdks ${VERSION}"
+          PDK_ROOT="${PWD}/pdk-root"; mkdir -p "${PDK_ROOT}"
+          nix shell \
+            'github:fossi-foundation/ciel' \
+            'github:fossi-foundation/nix-eda#magic' \
+            'github:fossi-foundation/nix-eda#klayout' \
+            'nixpkgs#ghr' \
+            --accept-flake-config \
+            --command bash -euxo pipefail -c "
+              ciel build --pdk-family ${{ matrix.family }} --pdk-root '${PDK_ROOT}' --jobs \$(nproc) '${VERSION}'
+              ciel push  --pdk-family ${{ matrix.family }} --pdk-root '${PDK_ROOT}' \
+                         --owner vyges-tools --repository pdk-releases '${VERSION}'
+            "
