@@ -1,0 +1,41 @@
+name: Package PDK release (non-ciel)
+
+# The generic-packager path for PDKs ciel can't build (icsprout55 today; NDA / customer
+# PDKs later): clone the mirror, pack per manifests/<pdk>.json into ciel-compatible
+# per-library tarballs, and publish here — so pdk-store gets one consistent artifact
+# shape across every PDK. Manual dispatch (the source content must be present in the
+# mirror; icsprout55 is under development, so this is the experiment harness for now).
+
+on:
+  workflow_dispatch:
+    inputs:
+      pdk:
+        description: 'PDK to package (a manifests/<pdk>.json must exist)'
+        default: icsprout55
+
+permissions:
+  contents: write          # ghr creates releases on this repo
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix (for ghr + zstd)
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Clone the mirror, pack per manifest, publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          PDK='${{ github.event.inputs.pdk }}'; PDK="${PDK:-icsprout55}"
+          MANIFEST="manifests/${PDK}.json"
+          MIRROR=$(python3 -c "import json;print(json.load(open('${MANIFEST}'))['source']['mirror'])")
+          BRANCH=$(python3 -c "import json,sys;print(json.load(open('${MANIFEST}'))['source'].get('ref_branch','main'))")
+          git clone --depth 1 --branch "${BRANCH}" "https://${MIRROR}.git" src
+          VERSION=$(git -C src rev-parse HEAD)
+          echo "Packaging ${PDK} @ ${VERSION}"
+          nix shell 'nixpkgs#ghr' 'nixpkgs#zstd' --command \
+            python3 scripts/pack_pdk.py \
+              --source src --manifest "${MANIFEST}" --version "${VERSION}" --out dist \
+              --owner vyges-tools --repository pdk-releases

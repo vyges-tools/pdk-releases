@@ -14,22 +14,30 @@ same way the flow uses OpenROAD / Yosys / Magic as commodity steps.
   (`sky130_fd_sc_hd.tar.zst`, `sky130_fd_pr.tar.zst`, …), so a consumer downloads only the
   libraries it needs.
 
-## How it's built
+## How it's built — two paths, one artifact shape
 
-`.github/workflows/build-release.yml` (weekly + manual `workflow_dispatch`):
+The release format above is universal; the *builder* depends on the PDK.
 
-1. resolves the open_pdks commit from the Vyges mirror (`vyges-tools/open_pdks@master`);
-2. in a Nix shell providing `ciel` + the EDA toolchain (`magic`, `klayout`) + `ghr`,
-   runs **`ciel build`** with `OPDKS_REPO_OWNER/NAME` pointed at the Vyges mirror, then
-3. **`ciel push`** packages the per-library tarballs and publishes the release here.
+**1. ciel families — `.github/workflows/build-release.yml`** (weekly + `workflow_dispatch`)
+for the PDKs ciel knows (`sky130`, `gf180mcu` from open_pdks; `ihp-sg13g2` from its own
+repo):
 
-Builds `sky130` and `gf180mcu` (both produced by open_pdks). `ihp_sg13g2` is **not** built
-here — it ships from its own upstream and is mirrored at
-[`vyges-tools/ihp-open-pdk`](https://github.com/vyges-tools/ihp-open-pdk).
+1. resolves the source commit from the Vyges mirror;
+2. in a Nix shell with `ciel` + the EDA toolchain (`magic`, `klayout`) + `ghr`, runs
+   **`ciel build`** with the source repo pointed at the Vyges mirror
+   (`OPDKS_REPO_*` for sky130/gf180, `IHP_REPO_*` for ihp), then
+3. **`ciel push`** packages the per-library tarballs and publishes here.
 
-> A full sky130 build is heavy (≈1–2 h, needs the magic toolchain). The workflow models
-> ciel's `build`/`push` process; validate it on the first manual dispatch and adjust the
-> Nix toolchain attributes if needed.
+> A full sky130 build is heavy (≈1–2 h, needs the magic toolchain); gf180 and ihp are
+> lighter. Validate on the first manual dispatch.
+
+**2. Generic packager — `.github/workflows/package-release.yml`** (`workflow_dispatch`)
+for PDKs ciel can't build (`icsprout55` today; NDA / customer PDKs later):
+`scripts/pack_pdk.py` clones the mirror and packs it per `manifests/<pdk>.json` into the
+**same** `common.tar.zst` + `<library>.tar.zst` shape, then publishes via `ghr`. This is
+how every non-ciel PDK still lands as consistent artifacts pdk-store can consume the same
+way. (icsprout55 is under development, so this path is the experiment harness until its
+source content lands in the mirror.)
 
 ## Consuming
 

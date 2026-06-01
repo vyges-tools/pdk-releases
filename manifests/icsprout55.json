@@ -1,0 +1,8 @@
+{
+  "family": "icsprout55",
+  "source": { "mirror": "github.com/vyges-tools/icsprout55", "ref_branch": "main" },
+  "common": ["prtech"],
+  "libraries": {
+    "icsprout55_sc": ["IP/icsprout55_sc"]
+  }
+}
