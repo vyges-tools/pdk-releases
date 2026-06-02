@@ -2,12 +2,13 @@ name: Build PDK releases
 run-name: "build ${{ github.event.inputs.family || 'all (weekly)' }} — ciel from mirror"
 
 # Builds the ciel-buildable PDK families from their Vyges mirrors using `ciel` as the
-# commodity builder, and publishes per-library tarball releases here — modeling
-# fossi-foundation/ciel-releases. sky130/gf180 build from the open_pdks mirror;
-# ihp-sg13g2 builds from the ihp-open-pdk mirror (ciel reads OPDKS_REPO_* / IHP_REPO_*).
-# A `setup` job emits a matrix containing ONLY the requested family (all three on the
-# weekly schedule), so a single-family dispatch spawns exactly one build job — no
-# spun-up-then-skipped legs. A full sky130 build is heavy (~1-2h, magic toolchain via Nix).
+# commodity builder, and publishes per-library tarball releases here. ONE job builds the
+# selected families in a SHARED Nix shell (ciel + magic + klayout + ghr) — a single Nix
+# install + closure for all of them — and the Nix store is cached across runs, so the
+# heavy EDA closure isn't re-downloaded each week. scripts/ci_build.sh resolves each
+# family's source commit, skips it if that commit is already released (idempotent; last
+# release stays) unless `force`, and builds only what changed. sky130/gf180 build from the
+# open_pdks mirror; ihp-sg13g2 from ihp-open-pdk (OPDKS_REPO_* / IHP_REPO_*).
 
 on:
   workflow_dispatch:
@@ -15,6 +16,10 @@ on:
       family:
         description: 'sky130 | gf180mcu | ihp-sg13g2 | all'
         default: all
+      force:
+        description: 'rebuild even if the source commit is already released'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 3 * * 1'   # weekly, Monday 03:00 UTC
 
@@ -26,66 +31,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.sel.outputs.matrix }}
-    steps:
-      - name: Select the families to build
-        id: sel
-        env:
-          REQ: ${{ github.event.inputs.family }}
-        run: |
-          ALL='[
-            {"family":"sky130","mirror":"open_pdks","branch":"master","src":"OPDKS"},
-            {"family":"gf180mcu","mirror":"open_pdks","branch":"master","src":"OPDKS"},
-            {"family":"ihp-sg13g2","mirror":"ihp-open-pdk","branch":"main","src":"IHP"}
-          ]'
-          if [ -z "$REQ" ] || [ "$REQ" = all ]; then
-            SEL=$(echo "$ALL" | jq -c .)
-          else
-            SEL=$(echo "$ALL" | jq -c --arg f "$REQ" '[.[] | select(.family==$f)]')
-          fi
-          echo "selected: $SEL"
-          echo "matrix={\"include\":$SEL}" >> "$GITHUB_OUTPUT"
-
   build:
-    needs: setup
     runs-on: ubuntu-latest
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    timeout-minutes: 600    # all families serial worst-case; skip-unchanged keeps it short
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Build from the Vyges mirror + publish the release
+      - name: Cache the Nix store (ciel + magic + klayout closure, reused across runs)
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-eda-${{ runner.os }}-${{ hashFiles('.github/workflows/build-release.yml') }}
+          restore-prefixes-first-match: nix-eda-${{ runner.os }}-
+
+      - name: Build the selected families in one shared Nix env
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FAMILY: ${{ github.event.inputs.family }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
-          set -euxo pipefail
-          MIRROR='${{ matrix.mirror }}'
-          # ciel reads OPDKS_REPO_* (sky130/gf180) or IHP_REPO_* (ihp) to pick the source —
-          # point whichever applies at the Vyges mirror.
-          if [ '${{ matrix.src }}' = OPDKS ]; then
-            export OPDKS_REPO_OWNER=vyges-tools OPDKS_REPO_NAME="${MIRROR}"
-          else
-            export IHP_REPO_OWNER=vyges-tools IHP_REPO_NAME="${MIRROR}"
-          fi
-          VERSION=$(git ls-remote "https://github.com/vyges-tools/${MIRROR}.git" '${{ matrix.branch }}' | awk 'NR==1{print $1}')
-          echo "Building ${{ matrix.family }} @ ${MIRROR} ${VERSION}"
-          PDK_ROOT="${PWD}/pdk-root"; mkdir -p "${PDK_ROOT}"
+          chmod +x scripts/ci_build.sh
           nix shell \
             'github:fossi-foundation/ciel' \
             'github:fossi-foundation/nix-eda#magic' \
             'github:fossi-foundation/nix-eda#klayout' \
             'nixpkgs#ghr' \
             --accept-flake-config \
-            --command bash -euxo pipefail -c "
-              ciel build --pdk-family ${{ matrix.family }} --pdk-root '${PDK_ROOT}' --jobs \$(nproc) '${VERSION}'
-              ciel push  --pdk-family ${{ matrix.family }} --pdk-root '${PDK_ROOT}' \
-                         --owner vyges-tools --repository pdk-releases '${VERSION}'
-            "
+            --command bash scripts/ci_build.sh
