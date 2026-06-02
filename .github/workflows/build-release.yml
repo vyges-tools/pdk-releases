@@ -1,4 +1,5 @@
 name: Build PDK releases
+run-name: "build ${{ github.event.inputs.family || 'all (weekly)' }} — ciel from mirror"
 
 # Builds the ciel-buildable PDK families from their Vyges mirrors using `ciel` as the
 # commodity builder, and publishes per-library tarball releases here — modeling

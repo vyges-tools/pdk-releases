@@ -1,4 +1,5 @@
 name: Package PDK release (non-ciel)
+run-name: "package ${{ github.event.inputs.pdk || 'icsprout55' }} — generic packager"
 
 # The generic-packager path for PDKs ciel can't build (icsprout55 today; NDA / customer
 # PDKs later): clone the mirror, pack per manifests/<pdk>.json into ciel-compatible
