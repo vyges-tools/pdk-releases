@@ -2,13 +2,13 @@ name: Build PDK releases
 run-name: "build ${{ github.event.inputs.family || 'all (weekly)' }} — ciel from mirror"
 
 # Builds the ciel-buildable PDK families from their Vyges mirrors using `ciel` as the
-# commodity builder, and publishes per-library tarball releases here. ONE job builds the
-# selected families in a SHARED Nix shell (ciel + magic + klayout + ghr) — a single Nix
-# install + closure for all of them — and the Nix store is cached across runs, so the
-# heavy EDA closure isn't re-downloaded each week. scripts/ci_build.sh resolves each
-# family's source commit, skips it if that commit is already released (idempotent; last
-# release stays) unless `force`, and builds only what changed. sky130/gf180 build from the
-# open_pdks mirror; ihp-sg13g2 from ihp-open-pdk (OPDKS_REPO_* / IHP_REPO_*).
+# commodity builder, and publishes per-library tarball releases here. ONE job installs Nix
+# once and caches the magic/klayout/ciel closure across runs; each family is its own
+# STAGE (step) for clear per-PDK status/timing. scripts/ci_build.sh resolves a family's
+# source commit and skips it (no Nix work) if that commit is already released ("promote
+# last release") unless `force`. sky130/gf180 build from the open_pdks mirror; ihp-sg13g2
+# from ihp-open-pdk (OPDKS_REPO_* / IHP_REPO_*). icsprout55 is a separate workflow
+# (package-release.yml — the generic-packager path).
 
 on:
   workflow_dispatch:
@@ -33,7 +33,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 600    # all families serial worst-case; skip-unchanged keeps it short
+    timeout-minutes: 600    # families build serially; skip-unchanged keeps it short
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      FORCE: ${{ github.event.inputs.force }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,18 +51,16 @@ jobs:
           primary-key: nix-eda-${{ runner.os }}-${{ hashFiles('.github/workflows/build-release.yml') }}
           restore-prefixes-first-match: nix-eda-${{ runner.os }}-
 
-      - name: Build the selected families in one shared Nix env
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FAMILY: ${{ github.event.inputs.family }}
-          FORCE: ${{ github.event.inputs.force }}
-        run: |
-          chmod +x scripts/ci_build.sh
-          nix shell \
-            'github:fossi-foundation/ciel' \
-            'github:fossi-foundation/nix-eda#magic' \
-            'github:fossi-foundation/nix-eda#klayout' \
-            'nixpkgs#ghr' \
-            --accept-flake-config \
-            --command bash scripts/ci_build.sh
+      # One stage per PDK — clear per-family status/timing in the Actions UI. A stage skips
+      # itself (no Nix work) when its source commit is already released.
+      - name: sky130
+        if: ${{ github.event.inputs.family == '' || github.event.inputs.family == 'all' || github.event.inputs.family == 'sky130' }}
+        run: bash scripts/ci_build.sh sky130
+
+      - name: gf180mcu
+        if: ${{ github.event.inputs.family == '' || github.event.inputs.family == 'all' || github.event.inputs.family == 'gf180mcu' }}
+        run: bash scripts/ci_build.sh gf180mcu
+
+      - name: ihp-sg13g2
+        if: ${{ github.event.inputs.family == '' || github.event.inputs.family == 'all' || github.event.inputs.family == 'ihp-sg13g2' }}
+        run: bash scripts/ci_build.sh ihp-sg13g2
