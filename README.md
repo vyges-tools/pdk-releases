@@ -36,8 +36,9 @@ for PDKs ciel can't build (`icsprout55` today; NDA / customer PDKs later):
 `scripts/pack_pdk.py` clones the mirror and packs it per `manifests/<pdk>.json` into the
 **same** `common.tar.zst` + `<library>.tar.zst` shape, then publishes via `ghr`. This is
 how every non-ciel PDK still lands as consistent artifacts pdk-store can consume the same
-way. (icsprout55 is under development, so this path is the experiment harness until its
-source content lands in the mirror.)
+way. icsprout55 is mirrored at [`vyges-tools/icsprout55`](https://github.com/vyges-tools/icsprout55)
+(from `openecos-projects/icsprout55-pdk`); dispatching this workflow packs `prtech` +
+`IP/STD_cell` + `IP/IO` into a release here.
 
 ## Consuming
 
