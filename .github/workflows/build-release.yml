@@ -1,15 +1,16 @@
 name: Build PDK releases
 
-# Builds sky130 + gf180mcu from the Vyges open_pdks mirror using `ciel` as the commodity
-# builder, and publishes per-library tarball releases here — modeling
-# fossi-foundation/ciel-releases. A full sky130 build is heavy (~1-2h, needs the magic
-# toolchain via Nix); validate on the first manual dispatch.
+# Builds the ciel-buildable PDK families from their Vyges mirrors using `ciel` as the
+# commodity builder, and publishes per-library tarball releases here — modeling
+# fossi-foundation/ciel-releases. sky130/gf180 build from the open_pdks mirror;
+# ihp-sg13g2 builds from the ihp-open-pdk mirror (ciel reads OPDKS_REPO_* / IHP_REPO_*).
+# A full sky130 build is heavy (~1-2h, magic toolchain via Nix); gf180/ihp are lighter.
 
 on:
   workflow_dispatch:
     inputs:
       family:
-        description: 'sky130 | gf180mcu | all'
+        description: 'sky130 | gf180mcu | ihp-sg13g2 | all'
         default: all
   schedule:
     - cron: '0 3 * * 1'   # weekly, Monday 03:00 UTC
@@ -28,7 +29,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        family: [sky130, gf180mcu]
+        include:
+          - family: sky130
+            mirror: open_pdks
+            branch: master
+            src: OPDKS
+          - family: gf180mcu
+            mirror: open_pdks
+            branch: master
+            src: OPDKS
+          - family: ihp-sg13g2
+            mirror: ihp-open-pdk
+            branch: main
+            src: IHP
     steps:
       - uses: actions/checkout@v4
 
@@ -46,17 +59,22 @@ jobs:
         if: steps.gate.outputs.run == 'yes'
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Build from the Vyges open_pdks mirror + publish the release
+      - name: Build from the Vyges mirror + publish the release
         if: steps.gate.outputs.run == 'yes'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # ciel reads these to choose the open_pdks source — point at the Vyges mirror.
-          OPDKS_REPO_OWNER: vyges-tools
-          OPDKS_REPO_NAME: open_pdks
         run: |
           set -euxo pipefail
-          VERSION=$(git ls-remote https://github.com/vyges-tools/open_pdks.git master | awk 'NR==1{print $1}')
-          echo "Building ${{ matrix.family }} @ open_pdks ${VERSION}"
+          MIRROR='${{ matrix.mirror }}'
+          # ciel reads OPDKS_REPO_* (sky130/gf180) or IHP_REPO_* (ihp) to pick the source —
+          # point whichever applies at the Vyges mirror.
+          if [ '${{ matrix.src }}' = OPDKS ]; then
+            export OPDKS_REPO_OWNER=vyges-tools OPDKS_REPO_NAME="${MIRROR}"
+          else
+            export IHP_REPO_OWNER=vyges-tools IHP_REPO_NAME="${MIRROR}"
+          fi
+          VERSION=$(git ls-remote "https://github.com/vyges-tools/${MIRROR}.git" '${{ matrix.branch }}' | awk 'NR==1{print $1}')
+          echo "Building ${{ matrix.family }} @ ${MIRROR} ${VERSION}"
           PDK_ROOT="${PWD}/pdk-root"; mkdir -p "${PDK_ROOT}"
           nix shell \
             'github:fossi-foundation/ciel' \
