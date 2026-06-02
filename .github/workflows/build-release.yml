@@ -42,6 +42,7 @@ jobs:
 
       - name: Cache the Nix store (ciel + magic + klayout closure, reused across runs)
         uses: nix-community/cache-nix-action@v6
+        continue-on-error: true   # caching is an optimization — never let it block a build
         with:
           primary-key: nix-eda-${{ runner.os }}-${{ hashFiles('.github/workflows/build-release.yml') }}
           restore-prefixes-first-match: nix-eda-${{ runner.os }}-
