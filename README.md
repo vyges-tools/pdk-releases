@@ -40,10 +40,35 @@ way. icsprout55 is mirrored at [`vyges-tools/icsprout55`](https://github.com/vyg
 (from `openecos-projects/icsprout55-pdk`); dispatching this workflow packs `prtech` +
 `IP/STD_cell` + `IP/IO` into a release here.
 
+## The PDK descriptor (`<name>.vyges-pdk.json`)
+
+Each release also carries its **Vyges PDK descriptor** — the PDK analogue of
+`vyges-metadata.json` in an IP repo. The descriptor lives at the **root of the mirror repo**
+(`vyges-tools/<mirror>/<name>.vyges-pdk.json`, e.g. `ihp-open-pdk/ihp_sg13g2.vyges-pdk.json`; `open_pdks`
+carries both `sky130a.vyges-pdk.json` + `gf180mcu.vyges-pdk.json`), so the mirror is self-describing, and
+the build CI bundles it from there:
+
+- **standalone release asset** `<name>.vyges-pdk.json` — the uniform shape **pdk-store reads** (both
+  the ciel and generic paths attach it); and
+- **inside `common.tar.zst`** as well (generic packager — manifest `descriptor` field).
+
+Bundling is **best-effort**: until a mirror carries the descriptor it is simply absent and the
+pipeline stays green; the next release picks it up automatically. The descriptor is
+schema-validated (`vyges-ip-internal/pdk_spec`) and published, byte-identical, via the public
+[`vyges-tools/pdk-catalog`](https://github.com/vyges-tools/pdk-catalog) — the source to inject
+into the mirrors with `scripts/sync_descriptors.py` (descriptors change rarely):
+
+```sh
+# place <name>.vyges-pdk.json into each mirror checkout, keyed by the descriptor's upstream.mirror
+scripts/sync_descriptors.py --descriptors ../pdk-catalog/descriptors --mirrors ../mirrors        # dry-run
+scripts/sync_descriptors.py --descriptors ../pdk-catalog/descriptors --mirrors ../mirrors --write
+```
+
 ## Consuming
 
 - **vyges pdk-store:** `fetch` pulls the per-library tarballs for sky130 / gf180 from here
-  (the descriptors' `source: local` + open_pdks `upstream`).
+  (the descriptors' `source: local` + open_pdks `upstream`), plus the `<name>.vyges-pdk.json`
+  descriptor asset — so a fetched PDK arrives self-describing.
 - **ciel:** the release format is ciel-native, so ciel can be pointed at this repo too.
 
 ---

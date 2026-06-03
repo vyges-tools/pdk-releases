@@ -8,14 +8,22 @@ This is the non-ciel counterpart to `ciel push`: for PDKs ciel can't build
 artifacts** so pdk-store sees one consistent shape across every PDK —
 
     <family>-<version>            # release tag
-      common.tar.zst              # shared / tech collateral
+      common.tar.zst              # shared / tech collateral (+ the descriptor)
       <library>.tar.zst           # one per cell library
+      <name>.vyges-pdk.json             # the Vyges PDK descriptor, as a standalone asset
 
 Manifest-driven (JSON):
 
     { "family": "icsprout55",
+      "descriptor": "icsprout55.vyges-pdk.json",     # Vyges PDK descriptor, injected into the mirror
       "common":   ["prtech", "libs.tech"],
       "libraries": { "icsprout55_sc": ["libs.ref/icsprout55_sc"] } }
+
+The `descriptor` (optional) is the `<name>.vyges-pdk.json` carried at the mirror root — the
+PDK analogue of `vyges-metadata.json` in an IP repo. When present in the source tree it
+travels **inside** `common.tar.zst` *and* is published as a **standalone release asset**
+(the uniform contract pdk-store reads). Absent (mirror not yet injected) → warn + skip;
+never fails the release.
 
 Packs only by default; pass --owner/--repository (+ a GITHUB_TOKEN) to publish via
 `ghr`, exactly as `ciel push` does (tag `<family>-<version>`, commitish `releases`).
@@ -24,6 +32,7 @@ Std-lib only; shells out to `tar` + `zstd` (+ `ghr` for upload).
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -46,18 +55,38 @@ def tar_zst(source, paths, out_path):
 
 def pack(source, manifest, version, out_dir):
     os.makedirs(out_dir, exist_ok=True)
-    tarballs = []
-    common = manifest.get("common", [])
+    artifacts = []
+
+    # The Vyges PDK descriptor (<name>.vyges-pdk.json), injected into the mirror like
+    # vyges-metadata.json is for IPs. Best-effort: ships INSIDE common.tar.zst AND as a
+    # standalone release asset. Absent until the mirror carries it -> warn + skip (never
+    # fails the release).
+    common = list(manifest.get("common", []))
+    descriptor = manifest.get("descriptor")
+    descriptor_present = bool(descriptor) and os.path.exists(os.path.join(source, descriptor))
+    if descriptor and not descriptor_present:
+        print(f"::warning::descriptor {descriptor!r} not found under {source} — skipping "
+              f"(inject it into the mirror repo)", file=sys.stderr)
+    if descriptor_present:
+        common.append(descriptor)   # also ship inside common.tar.zst
+
     if common:
-        tarballs.append(tar_zst(source, common, os.path.join(out_dir, "common.tar.zst")))
+        artifacts.append(tar_zst(source, common, os.path.join(out_dir, "common.tar.zst")))
     for lib, paths in manifest.get("libraries", {}).items():
-        tarballs.append(tar_zst(source, paths, os.path.join(out_dir, f"{lib}.tar.zst")))
-    if not tarballs:
-        raise SystemExit("manifest produced no tarballs (need `common` and/or `libraries`)")
-    print(f"packed {len(tarballs)} tarball(s) for {manifest['family']}-{version}:")
-    for t in tarballs:
-        print(f"  {os.path.basename(t)}  ({os.path.getsize(t)} bytes)")
-    return tarballs
+        artifacts.append(tar_zst(source, paths, os.path.join(out_dir, f"{lib}.tar.zst")))
+
+    # Standalone descriptor asset — the uniform contract pdk-store reads (no untar needed).
+    if descriptor_present:
+        dest = os.path.join(out_dir, os.path.basename(descriptor))
+        shutil.copyfile(os.path.join(source, descriptor), dest)
+        artifacts.append(dest)
+
+    if not artifacts:
+        raise SystemExit("manifest produced no artifacts (need `common`, `libraries`, and/or `descriptor`)")
+    print(f"packed {len(artifacts)} artifact(s) for {manifest['family']}-{version}:")
+    for a in artifacts:
+        print(f"  {os.path.basename(a)}  ({os.path.getsize(a)} bytes)")
+    return artifacts
 
 
 def publish(tarballs, family, version, owner, repository):
