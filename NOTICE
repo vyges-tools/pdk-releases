@@ -1,0 +1,25 @@
+Vyges PDK Releases (vyges-tools/pdk-releases)
+Copyright 2026 Vyges. All Rights Reserved.
+
+This product is authored by Vyges (https://vyges.com) and licensed under the
+Apache License, Version 2.0 (the "License"). You may obtain a copy of the
+License in the accompanying LICENSE file or at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+WHAT IS AND IS NOT COVERED BY THAT LICENSE
+------------------------------------------
+
+The Apache-2.0 license above covers ONLY the contents of this repository: the
+packaging scripts under scripts/ and the release manifests under manifests/.
+
+It does NOT cover the PDK payloads distributed as release assets. Each PDK is
+redistributed here in a ciel-compatible package format for convenience, and
+each remains under its own upstream license, unchanged and unrelicensed by
+Vyges. Packaging a PDK does not alter the terms under which it was published.
+
+Consult the license shipped inside each PDK package, and the upstream project
+it came from, before use or redistribution.
+
+Packages built from open_pdks (Apache-2.0) carry that project's terms; PDKs
+sourced elsewhere carry theirs.
